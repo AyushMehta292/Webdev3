@@ -1,0 +1,755 @@
+Commit 1: 74fb1f26e8dad2b310631361120fc8114153151a
+    Basic setup with 
+        [npm init]
+    Folder Structure
+        public
+        src
+            controllers
+                xyz.controller.js
+            db
+                index.js
+            middlewares
+                auth.middleware.js
+                multer.middleware.js
+            models
+                xyz.model.js
+            routes
+                xyz.route.js
+            utils
+                asynHandler.js
+                cloudinary.js
+                apiError.js
+                apiResponse.js
+            app.js
+            constants.js
+            index.js
+        package.json  -- add script
+            "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js"
+
+Commit 2/3/4: 9e821a027755c1abba5ff82d5e936e63ad4c318c
+    [npm dotenv] --> [npm i -D nodemon]
+    .gitignore generator
+    .prettierrc
+        {
+            "singleQuote": false,
+            "bracketSpacing": true,
+            "tabWidth": 2,
+            "trailingComma": "es5",
+            "semi": true
+        }
+    .prettierignore
+        /.vscode
+        /node_modules
+        ./dist
+
+        *.env
+        .env
+        .env.*
+
+Commit 7: 110e59c1e1e3b88940b0af7c5ecc6fd78fd94d51 Connect with database mongodb atlas
+        import dotenv from "dotenv"
+        import connectDB from "./db/index.js";
+
+        dotenv.config({
+            path: './env'
+        })
+        connectDB()
+
+Commit 8: fe28708a9598efc06e0a307c28d471c1e99a56d1 utils code discussion
+    [1.] apiError.js == This file defines a custom error class ApiError that extends the built-in JavaScript Error class. This custom error class is used to handle API errors in a more structured way.
+        
+            class ApiError extends Error {
+                constructor(
+                    statusCode,
+                    message= "Something went wrong",
+                    errors = [],
+                    stack = ""
+                ){
+                    super(message)
+                    this.statusCode = statusCode
+                    this.data = null
+                    this.message = message
+                    this.success = false;
+                    this.errors = errors
+
+                    if (stack) {
+                        this.stack = stack
+                    } else{
+                        Error.captureStackTrace(this, this.constructor)
+                    }
+
+                }
+            }
+
+            export {ApiError}
+
+    [2.] apiResponse.js
+
+            class ApiResponse {
+                constructor(statusCode, data, message = "Success"){
+                    this.statusCode = statusCode
+                    this.data = data
+                    this.message = message
+                    this.success = statusCode < 400
+                }
+            }
+
+            export { ApiResponse }
+
+    [3.] asyncHandler.js
+            // Define a function named asyncHandler that takes a requestHandler function as an argument
+            const asyncHandler = (requestHandler) => {
+            // Return a new function that will be used as Express middleware
+            return (req, res, next) => {
+                // Execute the requestHandler and handle it as a promise
+                Promise.resolve(requestHandler(req, res, next))
+                .catch((err) => {
+                    // If an error occurs, pass it to the next middleware
+                    next(err);
+                });
+            };
+            };
+
+            // Export the asyncHandler function
+            export { asyncHandler };
+
+            Show it's usecase using an example  ------->
+                    import express from 'express';
+                    import axios from 'axios';
+                    import { asyncHandler } from './asyncHandler'; // Import the asyncHandler
+
+                    const app = express();
+
+                    // Define a route to get users from an external API
+                    app.get('/api/users', asyncHandler(async (req, res, next) => {
+                    // Use Axios to make a GET request to the external API
+                    const response = await axios.get('https://jsonplaceholder.typicode.com/users');
+                    const users = response.data;
+
+                    // Send the user data as the response
+                    res.json(users);
+                    }));
+
+                    // Error handling middleware
+                    app.use((err, req, res, next) => {
+                    console.error(err.stack);
+                    res.status(500).send({ error: err.message });
+                    });
+
+                    // Start the server
+                    app.listen(3000, () => {
+                    console.log('Server is running on port 3000');
+                    });
+
+    [4.] cloudinary.js
+            import {v2 as cloudinary} from "cloudinary"
+            import fs from "fs"
+
+
+            cloudinary.config({ 
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME, 
+            api_key: process.env.CLOUDINARY_API_KEY, 
+            api_secret: process.env.CLOUDINARY_API_SECRET 
+            });
+
+            const uploadOnCloudinary = async (localFilePath) => {
+                try {
+                    if (!localFilePath) return null
+                    //upload the file on cloudinary
+                    const response = await cloudinary.uploader.upload(localFilePath, {
+                        resource_type: "auto"
+                    })
+                    // file has been uploaded successfull
+                    //console.log("file is uploaded on cloudinary ", response.url);
+                    fs.unlinkSync(localFilePath)
+                    return response;
+
+                } catch (error) {
+                    fs.unlinkSync(localFilePath) // remove the locally saved temporary file as the upload operation got failed
+                    return null;
+                }
+            }
+
+            export {uploadOnCloudinary}
+
+Commit 9: 89c9dff840aee45a552a7e43c93f422b6ad8e3ab Add User and Video model
+    users.model.js
+        import mongoose, { Schema } from "mongoose"; // Importing mongoose and Schema constructor from mongoose
+        import jwt from "jsonwebtoken"; // Importing jsonwebtoken for creating JWT tokens
+        import bcrypt from "bcrypt"; // Importing bcrypt for hashing passwords
+
+        // Defining the User schema
+        const userSchema = new Schema(
+            {
+                // Username field: must be unique, required, in lowercase, trimmed, and indexed
+                username: {
+                    type: String,
+                    required: true,
+                    unique: true,
+                    lowercase: true,
+                    trim: true,
+                    index: true
+                },
+                // Email field: must be unique, required, in lowercase, and trimmed
+                email: {
+                    type: String,
+                    required: true,
+                    unique: true,
+                    lowercase: true,
+                    trim: true,
+                },
+                // Full name field: must be required, trimmed, and indexed
+                fullName: {
+                    type: String,
+                    required: true,
+                    trim: true,
+                    index: true
+                },
+                // Avatar field: must be required, intended to store a URL to the user's profile picture
+                avatar: {
+                    type: String,
+                    required: true,
+                },
+                // Cover image field: optional, intended to store a URL to the user's cover image
+                coverImage: {
+                    type: String, 
+                },
+                // Watch history field: an array of ObjectIDs referencing the Video model
+                watchHistory: [
+                    {
+                        type: Schema.Types.ObjectId,
+                        ref: "Video"
+                    }
+                ],
+                // Password field: must be required, will be hashed before saving to the database
+                password: {
+                    type: String,
+                    required: [true, 'Password is required']
+                },
+                // Refresh token field: optional, stores the user's refresh token
+                refreshToken: {
+                    type: String
+                }
+            },
+            {
+                // Adds createdAt and updatedAt fields to the schema
+                timestamps: true
+            }
+        );
+
+        // Pre-save middleware to hash the password before saving the user document
+        userSchema.pre("save", async function (next) {
+            // If the password field is not modified, move to the next middleware
+            if (!this.isModified("password")) return next();
+
+            // Hash the password with a salt factor of 10
+            this.password = await bcrypt.hash(this.password, 10);
+            next(); // Proceed to save the document
+        });
+
+        // Method to check if the provided password is correct
+        userSchema.methods.isPasswordCorrect = async function(password) {
+            // Compare the provided password with the hashed password stored in the database
+            return await bcrypt.compare(password, this.password);
+        }
+
+        // Method to generate a JWT access token for the user
+        userSchema.methods.generateAccessToken = function() {
+            // Create a JWT token with the user's ID, email, username, and full name
+            return jwt.sign(
+                {
+                    _id: this._id,
+                    email: this.email,
+                    username: this.username,
+                    fullName: this.fullName
+                },
+                process.env.ACCESS_TOKEN_SECRET, // Secret key for signing the token
+                {
+                    expiresIn: process.env.ACCESS_TOKEN_EXPIRY // Token expiry time
+                }
+            );
+        }
+
+        // Method to generate a JWT refresh token for the user
+        userSchema.methods.generateRefreshToken = function() {
+            // Create a JWT token with the user's ID
+            return jwt.sign(
+                {
+                    _id: this._id,
+                },
+                process.env.REFRESH_TOKEN_SECRET, // Secret key for signing the token
+                {
+                    expiresIn: process.env.REFRESH_TOKEN_EXPIRY // Token expiry time
+                }
+            );
+        }
+
+        // Creating the User model from the schema and exporting it
+        export const User = mongoose.model("User", userSchema);
+
+    -----> show the usecase of pre-save middleware
+            import { User } from './userModel.js';
+            app.post('/register', async (req, res) => {
+            const { username, email, fullName, avatar, password } = req.body;
+            try {
+                const newUser = new User({
+                username,
+                email,
+                fullName,
+                avatar,
+                password
+                });
+                await newUser.save();
+                res.status(201).json({ message: 'User registered successfully!' });
+            } catch (error) {
+                res.status(400).json({ error: error.message });
+            }
+            });
+
+    -----> show how we can access the watchhistory of the user
+        [1.] Method within the userSchema
+
+        userSchema.methods.getWatchHistory = async function() {
+            await this.populate('watchHistory').execPopulate();
+            return this.watchHistory;
+        };
+
+        const user = await User.findById(userId);
+        const watchHistory = await user.getWatchHistory();
+        console.log(watchHistory);
+
+        //Sample Output
+            [
+            {
+                _id: '60c72b2f9b1d4c3d88f8e8b6',
+                title: 'Video 1',
+                duration: 120,
+                __v: 0
+            },
+            {
+                _id: '60c72b2f9b1d4c3d88f8e8b7',
+                title: 'Video 2',
+                duration: 90,
+                __v: 0
+            }
+            ]
+
+        [2.] Query with Population
+
+        const user = await User.findById(userId).populate('watchHistory');
+        console.log(user.watchHistory);
+
+    video.model.js
+            import mongoose, {Schema} from "mongoose";
+            import mongooseAggregatePaginate from "mongoose-aggregate-paginate-v2";
+
+            const videoSchema = new Schema(
+                {
+                    videoFile: {
+                        type: String, //cloudinary url
+                        required: true
+                    },
+                    thumbnail: {
+                        type: String, //cloudinary url
+                        required: true
+                    },
+                    title: {
+                        type: String, 
+                        required: true
+                    },
+                    description: {
+                        type: String, 
+                        required: true
+                    },
+                    duration: {
+                        type: Number, 
+                        required: true
+                    },
+                    views: {
+                        type: Number,
+                        default: 0
+                    },
+                    isPublished: {
+                        type: Boolean,
+                        default: true
+                    },
+                    owner: {
+                        type: Schema.Types.ObjectId,
+                        ref: "User"
+                    }
+
+                }, 
+                {
+                    timestamps: true
+                }
+            )
+
+            videoSchema.plugin(mongooseAggregatePaginate)
+
+            export const Video = mongoose.model("Video", videoSchema)
+    
+    -----> usecase of mongooseAggregatePaginate
+        <1>.    import mongoose from 'mongoose';
+                import { Video } from './path/to/videoModel';
+
+                // Example function to fetch paginated videos
+                async function getPaginatedVideos(page, limit) {
+                    try {
+                        // Define the aggregation pipeline
+                        const aggregate = Video.aggregate([
+                            {
+                                $match: { isPublished: true } // Only include published videos
+                            },
+                            {
+                                $sort: { views: -1 } // Sort by views in descending order
+                            },
+                            {
+                                $lookup: {
+                                    from: 'users', // The collection to join with
+                                    localField: 'owner', // Field from the input documents
+                                    foreignField: '_id', // Field from the documents of the 'users' collection
+                                    as: 'ownerDetails' // Output array field
+                                }
+                            },
+                            {
+                                $unwind: '$ownerDetails' // Deconstruct the array field from the previous stage
+                            },
+                            {
+                                $project: { // Specify the fields to include or exclude
+                                    videoFile: 1,
+                                    thumbnail: 1,
+                                    title: 1,
+                                    description: 1,
+                                    duration: 1,
+                                    views: 1,
+                                    owner: 1,
+                                    'ownerDetails.username': 1,
+                                    'ownerDetails.email': 1
+                                }
+                            }
+                        ]);
+
+                        // Use the paginate method
+                        const options = {
+                            page: page,
+                            limit: limit
+                        };
+
+                        const paginatedResults = await Video.aggregatePaginate(aggregate, options);
+                        return paginatedResults;
+                    } catch (error) {
+                        console.error('Error fetching paginated videos:', error);
+                        throw error;
+                    }
+                }
+
+                // Usage example
+                async function runExample() {
+                    try {
+                        const page = 1;
+                        const limit = 10;
+                        const paginatedVideos = await getPaginatedVideos(page, limit);
+                        console.log('Paginated Videos:', paginatedVideos);
+                    } catch (error) {
+                        console.error('Error in example run:', error);
+                    }
+                }
+
+                runExample();
+
+        <2>.    Sure, let's walk through a simple example using `mongooseAggregatePaginate` with some sample data. We'll assume you have a MongoDB collection of videos and users. Here's how you can use `mongooseAggregatePaginate` to paginate through the videos.
+
+                ### Sample Data
+
+                #### Videos Collection
+                ```json
+                [
+                    {
+                        "_id": "video1",
+                        "title": "Video 1",
+                        "views": 100,
+                        "isPublished": true,
+                        "owner": "user1"
+                    },
+                    {
+                        "_id": "video2",
+                        "title": "Video 2",
+                        "views": 200,
+                        "isPublished": true,
+                        "owner": "user2"
+                    },
+                    {
+                        "_id": "video3",
+                        "title": "Video 3",
+                        "views": 150,
+                        "isPublished": false,
+                        "owner": "user1"
+                    },
+                    {
+                        "_id": "video4",
+                        "title": "Video 4",
+                        "views": 250,
+                        "isPublished": true,
+                        "owner": "user3"
+                    }
+                ]
+                ```
+
+                #### Users Collection
+                ```json
+                [
+                    {
+                        "_id": "user1",
+                        "username": "user1",
+                        "email": "user1@example.com"
+                    },
+                    {
+                        "_id": "user2",
+                        "username": "user2",
+                        "email": "user2@example.com"
+                    },
+                    {
+                        "_id": "user3",
+                        "username": "user3",
+                        "email": "user3@example.com"
+                    }
+                ]
+                ```
+
+                ### Aggregation Pipeline with Pagination
+
+                1. **Define the Aggregation Pipeline**:
+                    ```javascript
+                    const aggregate = Video.aggregate([
+                        { $match: { isPublished: true } }, // Only include published videos
+                        { $sort: { views: -1 } }, // Sort by views in descending order
+                        {
+                            $lookup: {
+                                from: 'users', // The collection to join with
+                                localField: 'owner', // Field from the input documents
+                                foreignField: '_id', // Field from the documents of the 'users' collection
+                                as: 'ownerDetails' // Output array field
+                            }
+                        },
+                        { $unwind: '$ownerDetails' }, // Deconstruct the array field from the previous stage
+                        {
+                            $project: { // Specify the fields to include or exclude
+                                title: 1,
+                                views: 1,
+                                owner: 1,
+                                'ownerDetails.username': 1,
+                                'ownerDetails.email': 1
+                            }
+                        }
+                    ]);
+                    ```
+
+                2. **Specify Pagination Options**:
+                    ```javascript
+                    const options = {
+                        page: 1, // Page number
+                        limit: 2 // Number of items per page
+                    };
+                    ```
+
+                3. **Fetch Paginated Results**:
+                    ```javascript
+                    const paginatedResults = await Video.aggregatePaginate(aggregate, options);
+                    console.log(paginatedResults);
+                    ```
+
+                ### Expected Output
+
+                Given the sample data and the aggregation pipeline, the output for the first page with a limit of 2 items per page would look something like this:
+
+                ```json
+                {
+                    "docs": [
+                        {
+                            "title": "Video 4",
+                            "views": 250,
+                            "owner": "user3",
+                            "ownerDetails": {
+                                "username": "user3",
+                                "email": "user3@example.com"
+                            }
+                        },
+                        {
+                            "title": "Video 2",
+                            "views": 200,
+                            "owner": "user2",
+                            "ownerDetails": {
+                                "username": "user2",
+                                "email": "user2@example.com"
+                            }
+                        }
+                    ],
+                    "totalDocs": 3,
+                    "limit": 2,
+                    "totalPages": 2,
+                    "page": 1,
+                    "pagingCounter": 1,
+                    "hasPrevPage": false,
+                    "hasNextPage": true,
+                    "prevPage": null,
+                    "nextPage": 2
+                }
+                ```
+
+                ### Explanation
+
+                - **docs**: Contains the documents for the current page.
+                - **totalDocs**: Total number of documents that match the query.
+                - **limit**: Number of documents per page.
+                - **totalPages**: Total number of pages.
+                - **page**: Current page number.
+                - **pagingCounter**: Counter for the current page.
+                - **hasPrevPage**: Indicates if there is a previous page.
+                - **hasNextPage**: Indicates if there is a next page.
+                - **prevPage**: Previous page number (if any).
+                - **nextPage**: Next page number (if any).
+
+                This way, you can easily paginate through your video collection and display the results page by page.
+
+    -----> Output
+            {
+                "docs": [
+                    {
+                        "videoFile": "http://example.com/video1.mp4",
+                        "thumbnail": "http://example.com/thumbnail1.jpg",
+                        "title": "Sample Video 1",
+                        "description": "Description of sample video 1",
+                        "duration": 120,
+                        "views": 1000,
+                        "owner": "60b8d6b5f1e77c23d0e7d6b9",
+                        "ownerDetails": {
+                            "username": "user1",
+                            "email": "user1@example.com"
+                        }
+                    },
+                    // More video documents...
+                ],
+                "totalDocs": 100,
+                "limit": 10,
+                "totalPages": 10,
+                "page": 1,
+                "pagingCounter": 1,
+                "hasPrevPage": false,
+                "hasNextPage": true,
+                "prevPage": null,
+                "nextPage": 2
+            }
+
+Commits 10 & 11 are to fix some spelling mistakes
+Commit 12: multer.middleware.js
+                import multer from "multer";
+
+                const storage = multer.diskStorage({
+                    destination: function (req, file, cb) {
+                    cb(null, "./public/temp")
+                    },
+                    filename: function (req, file, cb) {
+                    
+                    cb(null, file.originalname)
+                    }
+                })
+                
+                export const upload = multer({ 
+                    storage, 
+                })
+    -----> usecase 
+                import express from "express";
+                import path from "path";
+                import { upload } from "./path/to/your/uploadMiddleware"; // Adjust the import path as necessary
+
+                const app = express();
+                const port = 3000;
+
+                // Middleware to serve static files
+                app.use(express.static(path.join(__dirname, 'public')));
+
+                // Route to handle file upload
+                app.post("/upload", upload.single("file"), (req, res) => {
+                    try {
+                        const file = req.file;
+                        if (!file) {
+                            return res.status(400).send({ message: "Please upload a file." });
+                        }
+                        res.status(200).send({ message: "File uploaded successfully.", file: file });
+                    } catch (error) {
+                        res.status(500).send({ message: "An error occurred during the upload.", error: error.message });
+                    }
+                });
+
+                app.listen(port, () => {
+                    console.log(`Server is running on http://localhost:${port}`);
+                });
+
+@POSTMAN- Lecture 14
+    Collections, {{environments}}, body-> form data
+
+@Access Refresh Token, Middleware and cookies in Backend
+    create auth.middleware.js
+
+@Access token and refresh token in Backend
+    refresh the acess token:- refreshAccessToken
+
+Commit: Add user account management endpoints/ Writing update controllers for user | Backend with JS
+
+??  Why subscription model required: bcz subscribers can be in crores, if we create a 'subscribers' field/array in user model, 
+    computational task will increase drastically, resulting in slow site.
+
+//mongooseAggregatePaginate complex example
+        const getWatchHistory = asyncHandler(async(req, res) => {
+            const user = await User.aggregate([
+                {
+                    $match: {
+                        _id: new mongoose.Types.ObjectId(req.user._id)
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "videos",
+                        localField: "watchHistory",
+                        foreignField: "_id",
+                        as: "watchHistory",
+                        pipeline: [
+                            {
+                                $lookup: {
+                                    from: "users",
+                                    localField: "owner",
+                                    foreignField: "_id",
+                                    as: "owner",
+                                    pipeline: [
+                                        {
+                                            $project: {
+                                                fullName: 1,
+                                                username: 1,
+                                                avatar: 1
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                $addFields:{
+                                    owner:{
+                                        $first: "$owner"
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ])
+
+            return res
+            .status(200)
+            .json(
+                new ApiResponse(
+                    200,
+                    user[0].watchHistory,
+                    "Watch history fetched successfully"
+                )
+            )
+        })
